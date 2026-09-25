@@ -74,6 +74,11 @@
   .sticker .qtyrow { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center; }
   .sticker .qtyrow input { padding: 5px 8px; font-size: 13px; }
   .unit { color: var(--muted); font-size: 12px; }
+  .sticker .opts { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+  .sticker .opts label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  .sticker .opts input[type=checkbox] { margin: 0; accent-color: var(--accent); }
+  .sticker .opts input[type=range] { width: 70px; accent-color: var(--accent); margin: 0; }
+  .sticker .opts .info { margin-left: auto; font-variant-numeric: tabular-nums; }
   .icons { display: flex; gap: 2px; }
   .icons button {
     border: 0; background: transparent; color: var(--muted); cursor: pointer; padding: 4px; border-radius: 6px;
@@ -210,7 +215,7 @@
         const db = await openDB();
         const tx = db.transaction(STORE, 'readwrite'), st = tx.objectStore(STORE);
         st.clear();
-        stickers.forEach((s, i) => st.put({ order: i, name: s.name, width: s.width, qty: s.qty, ext: s.ext, fileName: s.file.name, type: s.file.type, blob: s.file }));
+        stickers.forEach((s, i) => st.put({ order: i, name: s.name, width: s.width, qty: s.qty, ext: s.ext, fileName: s.file.name, type: s.file.type, blob: s.file, trim: s.trim, deshadow: s.deshadow, threshold: s.threshold }));
         await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
       } catch (err) { console.warn('persist failed', err); }
     }, 250);
@@ -225,9 +230,9 @@
       rows.sort((a, b) => a.order - b.order);
       for (const row of rows) {
         const file = new File([row.blob], row.fileName, { type: row.type });
-        const dataUrl = await readAsDataURL(file);
-        const img = await loadImage(dataUrl);
-        stickers.push({ id: ++uid, file, img, dataUrl, ext: row.ext, name: row.name, width: row.width, qty: row.qty });
+        const st = await makeSticker(file, { trim: row.trim, deshadow: row.deshadow, threshold: row.threshold });
+        Object.assign(st, { name: row.name, width: row.width, qty: row.qty });
+        stickers.push(st);
       }
     } catch (err) { console.warn('restore failed', err); }
     renderList(); draw();
@@ -270,20 +275,105 @@
     const list = [...files].filter((f) => f.type.startsWith('image/') || /\.(png|jpe?g|webp|svg|gif)$/i.test(f.name));
     for (const file of list) {
       try {
-        const dataUrl = await readAsDataURL(file);
-        const img = await loadImage(dataUrl);
-        const ext = (file.name.match(/\.([a-z0-9]+)$/i) || [, 'png'])[1].toLowerCase();
-        stickers.push({
-          id: ++uid, file, img, dataUrl, ext,
-          name: file.name.replace(/\.[^.]+$/, ''),
-          width: 2.5, qty: settings.defaultQty || 500,
-        });
+        const st = await makeSticker(file);
+        st.width = 2.5; st.qty = settings.defaultQty || 500;
+        stickers.push(st);
       } catch (err) { toast(`Could not load ${file.name}`); }
     }
     renderList(); draw(); persist();
   }
   const readAsDataURL = (f) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f); });
   const loadImage = (src) => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
+
+  // ---------- artwork cleanup: trim transparent margins, strip baked-in shadows ----------
+  async function makeSticker(file, opts = {}) {
+    const origUrl = await readAsDataURL(file);
+    const origImg = await loadImage(origUrl);
+    const ext = (file.name.match(/\.([a-z0-9]+)$/i) || [, 'png'])[1].toLowerCase();
+    const s = {
+      id: ++uid, file, origImg, origUrl, ext, name: file.name.replace(/\.[^.]+$/, ''),
+      width: 2.5, qty: 500,
+      trim: opts.trim ?? true, deshadow: opts.deshadow, threshold: opts.threshold ?? 50,
+    };
+    s.analysis = analyze(origImg, s.threshold);
+    if (s.deshadow === undefined) s.deshadow = s.analysis.shadowLikely;
+    await reprocess(s);
+    return s;
+  }
+
+  // Reads alpha and classifies pixels: "solid" (alpha >= threshold), "edge" (within 2px of solid),
+  // and "soft" (everything else with alpha > 0: drop shadows, glows, halos).
+  function analyze(img, thresholdPct) {
+    const W = img.naturalWidth, H = img.naturalHeight;
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const ctx = c.getContext('2d', { willReadFrequently: true }); ctx.drawImage(img, 0, 0);
+    let data;
+    try { data = ctx.getImageData(0, 0, W, H); } catch { return { W, H, opaque: true, shadowLikely: false }; }
+    const a = data.data, T = Math.round(thresholdPct / 100 * 255);
+    const solid = new Uint8Array(W * H);
+    let anyTransparent = false, visible = 0;
+    for (let i = 0; i < W * H; i++) {
+      const al = a[i * 4 + 3];
+      if (al > 0) visible++;
+      if (al < 255) anyTransparent = true;
+      solid[i] = al >= T ? 1 : 0;
+    }
+    if (!anyTransparent) return { W, H, opaque: true, shadowLikely: false, data };
+    const keep = dilate(solid, W, H, 2);
+    let soft = 0;
+    for (let i = 0; i < W * H; i++) if (a[i * 4 + 3] > 0 && !keep[i]) soft++;
+    // bbox of kept pixels and of any visible pixel
+    const bb = (mask) => {
+      let x0 = W, y0 = H, x1 = -1, y1 = -1;
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (mask(y * W + x)) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+      return x1 < 0 ? null : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+    };
+    return {
+      W, H, data, keep, opaque: false,
+      bboxKeep: bb((i) => keep[i]), bboxAll: bb((i) => a[i * 4 + 3] > 0),
+      softRatio: visible ? soft / visible : 0,
+      shadowLikely: visible > 0 && soft / visible > 0.03 && soft > 400,
+    };
+  }
+  function dilate(mask, W, H, r) {
+    const tmp = new Uint8Array(W * H), out = new Uint8Array(W * H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      let v = 0; for (let k = -r; k <= r && !v; k++) { const xx = x + k; if (xx >= 0 && xx < W && mask[y * W + xx]) v = 1; }
+      tmp[y * W + x] = v;
+    }
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      let v = 0; for (let k = -r; k <= r && !v; k++) { const yy = y + k; if (yy >= 0 && yy < H && tmp[yy * W + x]) v = 1; }
+      out[y * W + x] = v;
+    }
+    return out;
+  }
+  // Builds s.img / s.dataUrl / s.blob from the original according to s.trim / s.deshadow / s.threshold.
+  async function reprocess(s) {
+    const A = s.analysis;
+    const unchanged = () => { s.img = s.origImg; s.dataUrl = s.origUrl; s.blob = null; s.processed = false; s.cropInfo = ''; };
+    if (A.opaque || (!s.trim && !s.deshadow)) return unchanged();
+    const { W, H } = A;
+    const data = new ImageData(new Uint8ClampedArray(A.data.data), W, H);
+    const a = data.data;
+    if (s.deshadow) for (let i = 0; i < W * H; i++) if (!A.keep[i]) a[i * 4 + 3] = 0;
+    const box = s.trim ? (s.deshadow ? A.bboxKeep : A.bboxAll) : { x: 0, y: 0, w: W, h: H };
+    if (!box) return unchanged();
+    if (!s.deshadow && box.w === W && box.h === H) return unchanged();
+    const full = document.createElement('canvas'); full.width = W; full.height = H;
+    full.getContext('2d').putImageData(data, 0, 0);
+    const out = document.createElement('canvas'); out.width = box.w; out.height = box.h;
+    out.getContext('2d').drawImage(full, box.x, box.y, box.w, box.h, 0, 0, box.w, box.h);
+    s.blob = await canvasToBlob(out);
+    s.dataUrl = out.toDataURL('image/png');
+    s.img = await loadImage(s.dataUrl);
+    s.processed = true;
+    s.cropInfo = `${W}\u00D7${H} \u2192 ${box.w}\u00D7${box.h}`;
+  }
+  async function updateProcessing(s, changes) {
+    Object.assign(s, changes);
+    if ('threshold' in changes) s.analysis = analyze(s.origImg, s.threshold);
+    await reprocess(s);
+  }
 
   // ---------- sticker list UI ----------
   const listEl = $('#list');
@@ -315,6 +405,12 @@
             <input type="number" class="qty" min="1" step="1" value="${s.qty}" title="Quantity">
             <span class="unit">pcs</span>
           </div>
+          ${s.analysis.opaque ? '' : `<div class="opts">
+            <label title="Crop away fully transparent margins"><input type="checkbox" class="trim" ${s.trim ? 'checked' : ''}> Trim</label>
+            <label title="Strip soft semi-transparent pixels (drop shadows, glows) that are not part of the artwork"><input type="checkbox" class="deshadow" ${s.deshadow ? 'checked' : ''}> Shadow</label>
+            <input type="range" class="thr" min="10" max="95" step="5" value="${s.threshold}" title="Shadow cutoff: pixels below this opacity are treated as shadow" ${s.deshadow ? '' : 'hidden'}>
+            <span class="info">${s.cropInfo}</span>
+          </div>`}
         </div>`;
       const w = el.querySelector('.w'), h = el.querySelector('.hh');
       const ratio = s.img.naturalHeight / s.img.naturalWidth;
@@ -330,6 +426,14 @@
       w.addEventListener('blur', () => { w.value = fmt(toUnit(s.width)); });
       h.addEventListener('blur', () => { h.value = fmt(toUnit(heightOf(s))); });
       el.querySelector('.name').addEventListener('input', (e) => { s.name = e.target.value; draw(); persist(); });
+      const opts = el.querySelector('.opts');
+      if (opts) {
+        const trim = opts.querySelector('.trim'), de = opts.querySelector('.deshadow'), thr = opts.querySelector('.thr'), info = opts.querySelector('.info');
+        const refresh = () => { el.querySelector('.thumb').src = s.dataUrl; info.textContent = s.cropInfo; h.value = fmt(toUnit(heightOf(s))); draw(); persist(); };
+        trim.addEventListener('change', async () => { await updateProcessing(s, { trim: trim.checked }); refresh(); });
+        de.addEventListener('change', async () => { thr.hidden = !de.checked; await updateProcessing(s, { deshadow: de.checked }); refresh(); });
+        let thrT; thr.addEventListener('input', () => { clearTimeout(thrT); thrT = setTimeout(async () => { await updateProcessing(s, { threshold: +thr.value }); refresh(); }, 120); });
+      }
       el.querySelector('.qty').addEventListener('input', (e) => { s.qty = Math.max(1, parseInt(e.target.value) || 1); persist(); });
       el.querySelector('.icons').addEventListener('click', (e) => {
         const act = e.target.dataset.act; if (!act) return;
@@ -479,13 +583,15 @@
       const folder = zip.folder('stickers');
       const manifest = [];
       stickers.forEach((s, i) => {
-        const fname = `${i + 1}.${s.ext}`;
-        folder.file(fname, s.file);
+        const fname = `${i + 1}.${s.processed ? 'png' : s.ext}`;
+        folder.file(fname, s.processed ? s.blob : s.file);
+        if (s.processed) zip.folder('originals').file(`${i + 1}.${s.ext}`, s.file);
         manifest.push({
           number: i + 1, name: s.name, file: `stickers/${fname}`,
           width_in: +fmtIn(s.width), height_in: +fmtIn(heightOf(s)),
           width_mm: +fmtMm(s.width), height_mm: +fmtMm(heightOf(s)),
           quantity: s.qty, artwork_px: `${s.img.naturalWidth}x${s.img.naturalHeight}`,
+          processing: s.processed ? { trimmed: s.trim, shadow_removed: s.deshadow, original: `originals/${i + 1}.${s.ext}` } : null,
           artwork_dpi_at_size: Math.round(s.img.naturalWidth / s.width),
         });
       });
@@ -572,7 +678,7 @@
       const vals = [
         String(i + 1), s.name, `${fmtIn(s.width)} × ${fmtIn(heightOf(s))}`,
         `${fmtMm(s.width)} × ${fmtMm(heightOf(s))}`, s.qty.toLocaleString(),
-        `stickers/${i + 1}.${s.ext}`,
+        `stickers/${i + 1}.${s.processed ? 'png' : s.ext}`,
       ];
       let x = M + 6;
       vals.forEach((v, j) => { doc.text(doc.splitTextToSize(v, cols[j].w - 10)[0], x, y); x += cols[j].w; });
@@ -594,7 +700,7 @@
         ['Quantity', `${s.qty.toLocaleString()} pcs`],
         ['Material', settings.material], ['Cut', settings.cut],
         ['Artwork', `${s.img.naturalWidth} × ${s.img.naturalHeight} px  (~${Math.round(s.img.naturalWidth / s.width)} dpi at size)`],
-        ['File', `stickers/${i + 1}.${s.ext}`],
+        ['File', `stickers/${i + 1}.${s.processed ? 'png' : s.ext}`],
       ];
       let sy = M + 34;
       specs.forEach(([k, v]) => { doc.setTextColor(113, 113, 122); doc.text(k, M, sy); doc.setTextColor(24, 24, 27); doc.text(v, M + 90, sy); sy += 16; });
