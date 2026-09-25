@@ -15,7 +15,8 @@ Open `index.html` in a browser (or serve the folder: `python3 -m http.server 876
 5. **Export bundle**: a ZIP with
    - `spec-sheet.png`: the overview sheet
    - `spec.pdf`: factory spec (summary + overview, sticker table in inches and mm, one page per sticker with the artwork shown at actual size)
-   - `stickers/N.png`: the artwork files, numbered to match the `#` labels (trimmed / de-shadowed where applied)
+   - `stickers/N.png`: lossless artwork, numbered to match the `#` labels (trimmed / de-shadowed where applied)
+   - `stickers/N.jpg`: the same artwork as JPEG at quality 100, transparency flattened to white
    - `originals/N.ext`: untouched originals for any sticker that was modified
    - `spec.json`: machine-readable manifest
 

@@ -582,19 +582,23 @@
       zip.file('spec-sheet.png', sheetBlob);
       const folder = zip.folder('stickers');
       const manifest = [];
-      stickers.forEach((s, i) => {
-        const fname = `${i + 1}.${s.processed ? 'png' : s.ext}`;
-        folder.file(fname, s.processed ? s.blob : s.file);
+      for (const [i, s] of stickers.entries()) {
+        // PNG: lossless master. Reuse the processed blob or the original PNG bytes; re-encode other formats losslessly.
+        const png = s.processed ? s.blob : (s.ext === 'png' ? s.file : await encode(s.img, 'image/png'));
+        // JPG: max quality (100), transparency flattened to white. Original JPGs are passed through untouched.
+        const jpg = (!s.processed && /^jpe?g$/.test(s.ext)) ? s.file : await encode(s.img, 'image/jpeg', 1);
+        folder.file(`${i + 1}.png`, png);
+        folder.file(`${i + 1}.jpg`, jpg);
         if (s.processed) zip.folder('originals').file(`${i + 1}.${s.ext}`, s.file);
         manifest.push({
-          number: i + 1, name: s.name, file: `stickers/${fname}`,
+          number: i + 1, name: s.name, file: `stickers/${i + 1}.png`, file_jpg: `stickers/${i + 1}.jpg`,
           width_in: +fmtIn(s.width), height_in: +fmtIn(heightOf(s)),
           width_mm: +fmtMm(s.width), height_mm: +fmtMm(heightOf(s)),
           quantity: s.qty, artwork_px: `${s.img.naturalWidth}x${s.img.naturalHeight}`,
           processing: s.processed ? { trimmed: s.trim, shadow_removed: s.deshadow, original: `originals/${i + 1}.${s.ext}` } : null,
           artwork_dpi_at_size: Math.round(s.img.naturalWidth / s.width),
         });
-      });
+      }
       const pdfBlob = await buildPdf(sheetBlob);
       zip.file('spec.pdf', pdfBlob);
       zip.file('spec.json', JSON.stringify({
@@ -678,7 +682,7 @@
       const vals = [
         String(i + 1), s.name, `${fmtIn(s.width)} × ${fmtIn(heightOf(s))}`,
         `${fmtMm(s.width)} × ${fmtMm(heightOf(s))}`, s.qty.toLocaleString(),
-        `stickers/${i + 1}.${s.processed ? 'png' : s.ext}`,
+        `stickers/${i + 1}.png / .jpg`,
       ];
       let x = M + 6;
       vals.forEach((v, j) => { doc.text(doc.splitTextToSize(v, cols[j].w - 10)[0], x, y); x += cols[j].w; });
@@ -700,7 +704,7 @@
         ['Quantity', `${s.qty.toLocaleString()} pcs`],
         ['Material', settings.material], ['Cut', settings.cut],
         ['Artwork', `${s.img.naturalWidth} × ${s.img.naturalHeight} px  (~${Math.round(s.img.naturalWidth / s.width)} dpi at size)`],
-        ['File', `stickers/${i + 1}.${s.processed ? 'png' : s.ext}`],
+        ['Files', `stickers/${i + 1}.png (lossless), stickers/${i + 1}.jpg`],
       ];
       let sy = M + 34;
       specs.forEach(([k, v]) => { doc.setTextColor(113, 113, 122); doc.text(k, M, sy); doc.setTextColor(24, 24, 27); doc.text(v, M + 90, sy); sy += 16; });
@@ -731,6 +735,13 @@
     doc.text(`${settings.project || 'Sticker order'}  ·  page ${page}`, PW - 48, PH - 24, { align: 'right' });
   }
   const blobToDataURL = (b) => new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(b); });
+  async function encode(img, type, quality) {
+    const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight;
+    const ctx = c.getContext('2d');
+    if (type === 'image/jpeg') { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); }
+    ctx.drawImage(img, 0, 0);
+    return canvasToBlob(c, type, quality);
+  }
   async function imageToPngDataUrl(img, maxPx) {
     const r = Math.min(1, maxPx / Math.max(img.naturalWidth, img.naturalHeight));
     const c = document.createElement('canvas');
