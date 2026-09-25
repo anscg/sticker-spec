@@ -68,9 +68,9 @@
   .sticker .top { display: flex; align-items: center; gap: 6px; }
   .sticker .num { font-weight: 700; color: var(--red); font-size: 12px; flex-shrink: 0; }
   .sticker .name { flex: 1; padding: 5px 8px; font-size: 13px; }
-  .sticker .dims { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; align-items: center; }
+  .sticker .dims { display: grid; grid-template-columns: 1fr auto 1fr auto; gap: 6px; align-items: center; }
   .sticker .dims input { padding: 5px 8px; font-size: 13px; }
-  .sticker .dims .h { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .sticker .dims .x { color: var(--muted); font-size: 12px; }
   .sticker .qtyrow { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center; }
   .sticker .qtyrow input { padding: 5px 8px; font-size: 13px; }
   .unit { color: var(--muted); font-size: 12px; }
@@ -307,19 +307,28 @@
           </div>
           <div class="dims">
             <input type="number" class="w" step="${settings.unit === 'mm' ? 1 : 0.05}" min="0.1" value="${fmt(toUnit(s.width))}" title="Width">
-            <span class="h">&times; ${fmt(toUnit(heightOf(s)))} ${settings.unit}</span>
-            <span class="unit">${settings.unit} wide</span>
+            <span class="x">&times;</span>
+            <input type="number" class="hh" step="${settings.unit === 'mm' ? 1 : 0.05}" min="0.1" value="${fmt(toUnit(heightOf(s)))}" title="Height">
+            <span class="unit">${settings.unit}</span>
           </div>
           <div class="qtyrow">
             <input type="number" class="qty" min="1" step="1" value="${s.qty}" title="Quantity">
             <span class="unit">pcs</span>
           </div>
         </div>`;
-      const w = el.querySelector('.w'), h = el.querySelector('.h');
+      const w = el.querySelector('.w'), h = el.querySelector('.hh');
+      const ratio = s.img.naturalHeight / s.img.naturalWidth;
       w.addEventListener('input', () => {
         const v = fromUnit(parseFloat(w.value));
-        if (v > 0 && isFinite(v)) { s.width = v; h.innerHTML = `&times; ${fmt(toUnit(heightOf(s)))} ${settings.unit}`; draw(); persist(); }
+        if (v > 0 && isFinite(v)) { s.width = v; h.value = fmt(toUnit(heightOf(s))); draw(); persist(); }
       });
+      h.addEventListener('input', () => {
+        const v = fromUnit(parseFloat(h.value));
+        if (v > 0 && isFinite(v)) { s.width = v / ratio; w.value = fmt(toUnit(s.width)); draw(); persist(); }
+      });
+      // tidy the untouched field's rounding once editing ends
+      w.addEventListener('blur', () => { w.value = fmt(toUnit(s.width)); });
+      h.addEventListener('blur', () => { h.value = fmt(toUnit(heightOf(s))); });
       el.querySelector('.name').addEventListener('input', (e) => { s.name = e.target.value; draw(); persist(); });
       el.querySelector('.qty').addEventListener('input', (e) => { s.qty = Math.max(1, parseInt(e.target.value) || 1); persist(); });
       el.querySelector('.icons').addEventListener('click', (e) => {

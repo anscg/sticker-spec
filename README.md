@@ -7,7 +7,7 @@ Single-file tool for producing sticker printing specs for a factory.
 Open `index.html` in a browser (or serve the folder: `python3 -m http.server 8765`).
 
 1. Drop sticker artwork (PNG/JPG/WebP/SVG) anywhere on the page.
-2. Set each sticker's width in inches or mm. Height is computed from the image's aspect ratio.
+2. Set each sticker's width or height in inches or mm. The other dimension follows from the image's aspect ratio.
 3. Fill in order details (project name, material, cut, quantity, notes).
 4. **Export spec PNG**: the overview sheet with `#N` labels, red dimension brackets and sizes.
 5. **Export bundle**: a ZIP with
