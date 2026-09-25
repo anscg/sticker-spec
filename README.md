@@ -1,6 +1,6 @@
 # Sticker Spec
 
-> This project is vibe coded.
+> This project is vibe coded. It does what I want it to do and I made it for a very specific task.
 
 Single-file tool for producing sticker printing specs for a factory.
 
