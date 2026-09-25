@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sticker Spec</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #f4f4f5;
+    --panel: #ffffff;
+    --border: #e4e4e7;
+    --text: #18181b;
+    --muted: #5f5f6b;
+    --red: #ff1a1a;
+    --accent: #ec3750;
+    --accent-ink: #ffffff;
+    --input: #fafafa;
+    --shadow: 0 1px 2px rgba(0,0,0,.05), 0 8px 24px -12px rgba(0,0,0,.15);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg); color: var(--text); font-size: 14px;
+    display: grid; grid-template-columns: 360px 1fr; height: 100vh; overflow: hidden;
+  }
+  aside {
+    background: var(--panel); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .side-head { padding: 18px 20px 14px; border-bottom: 1px solid var(--border); }
+  .side-head h1 { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: -.01em; }
+  .side-head p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+  .side-body { flex: 1; overflow-y: auto; padding: 16px 20px 24px; display: flex; flex-direction: column; gap: 18px; }
+  .drop {
+    border: 2px dashed #d4d4d8; border-radius: 12px; padding: 22px 16px; text-align: center;
+    color: var(--muted); cursor: pointer; transition: border-color .15s, background .15s;
+  }
+  .drop strong { color: var(--text); display: block; margin-bottom: 4px; font-weight: 600; }
+  .drop.over { border-color: var(--accent); background: #fff5f6; }
+  .drop input { display: none; }
+  h2 { margin: 0 0 8px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  .field { display: flex; flex-direction: column; gap: 5px; }
+  .field label { font-size: 12px; color: var(--muted); }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  input[type=text], input[type=number], select, textarea {
+    font: inherit; width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
+    background: var(--input); color: var(--text); outline: none;
+  }
+  input:focus, select:focus, textarea:focus { border-color: var(--accent); background: #fff; }
+  textarea { resize: vertical; min-height: 60px; }
+  .settings { display: flex; flex-direction: column; gap: 10px; }
+  .stickers { display: flex; flex-direction: column; gap: 8px; }
+  .sticker {
+    border: 1px solid var(--border); border-radius: 10px; padding: 10px; display: grid;
+    grid-template-columns: 56px 1fr; gap: 10px; background: #fff;
+  }
+  .sticker .thumb {
+    width: 56px; height: 56px; border-radius: 6px; object-fit: contain;
+    background: repeating-conic-gradient(#f1f1f3 0 25%, #fff 0 50%) 0 0 / 12px 12px;
+    border: 1px solid var(--border);
+  }
+  .sticker .meta { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .sticker .top { display: flex; align-items: center; gap: 6px; }
+  .sticker .num { font-weight: 700; color: var(--red); font-size: 12px; flex-shrink: 0; }
+  .sticker .name { flex: 1; padding: 5px 8px; font-size: 13px; }
+  .sticker .dims { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; align-items: center; }
+  .sticker .dims input { padding: 5px 8px; font-size: 13px; }
+  .sticker .dims .h { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .sticker .qtyrow { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center; }
+  .sticker .qtyrow input { padding: 5px 8px; font-size: 13px; }
+  .unit { color: var(--muted); font-size: 12px; }
+  .icons { display: flex; gap: 2px; }
+  .icons button {
+    border: 0; background: transparent; color: var(--muted); cursor: pointer; padding: 4px; border-radius: 6px;
+    font-size: 13px; line-height: 1;
+  }
+  .icons button:hover { background: var(--bg); color: var(--text); }
+  .icons button.del:hover { color: var(--accent); }
+  .side-foot { padding: 14px 20px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+  .btn {
+    font: inherit; font-weight: 600; padding: 10px 14px; border-radius: 9px; border: 1px solid var(--border);
+    background: #fff; color: var(--text); cursor: pointer; transition: transform .05s, background .15s;
+  }
+  .btn:hover { background: var(--bg); }
+  .btn:active { transform: translateY(1px); }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .btn.primary:hover { background: #d92b43; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn.danger { color: var(--accent); }
+  .btn.danger:hover { background: #fff5f6; }
+  main { position: relative; overflow: auto; padding: 32px; display: flex; align-items: flex-start; justify-content: center; }
+  main.over::after {
+    content: "Drop images to add stickers"; position: fixed; inset: 0 0 0 360px; display: grid; place-items: center;
+    background: rgba(236,55,80,.08); border: 3px dashed var(--accent); font-weight: 600; font-size: 18px; color: var(--accent);
+    pointer-events: none;
+  }
+  #preview {
+    max-width: 100%; height: auto; background: #fff; border-radius: 6px; box-shadow: var(--shadow);
+  }
+  .empty {
+    position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); text-align: center; pointer-events: none;
+  }
+  .empty strong { display: block; color: var(--text); font-size: 18px; margin-bottom: 6px; }
+  .status { position: fixed; bottom: 16px; right: 16px; background: var(--text); color: #fff; padding: 8px 12px; border-radius: 8px; font-size: 12px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .status.show { opacity: 1; }
+  .empty-list { color: var(--muted); font-size: 12px; padding: 4px 0; }
+</style>
+</head>
+<body>
+<aside>
+  <div class="side-head">
+    <h1>Sticker Spec</h1>
+    <p>Drop artwork, set widths, export a factory spec.</p>
+  </div>
+  <div class="side-body">
+    <label class="drop" id="drop">
+      <strong>Drop sticker images here</strong>
+      or click to browse · PNG, JPG, WebP, SVG
+      <input type="file" id="file" accept="image/*" multiple>
+    </label>
+
+    <section>
+      <h2>Stickers</h2>
+      <div class="stickers" id="list"><div class="empty-list">No stickers yet.</div></div>
+    </section>
+
+    <section class="settings">
+      <h2>Order</h2>
+      <div class="field"><label>Project / order name</label><input type="text" id="project" placeholder="Hack Club stickers"></div>
+      <div class="row">
+        <div class="field"><label>Input unit</label>
+          <select id="unit"><option value="in">inches</option><option value="mm">millimetres</option></select>
+        </div>
+        <div class="field"><label>Default quantity</label><input type="number" id="defaultQty" value="500" min="1" step="1"></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Material</label>
+          <select id="material">
+            <option>Vinyl (matte)</option><option>Vinyl (glossy)</option><option>Holographic</option>
+            <option>Transparent</option><option>Paper</option><option>Other (see notes)</option>
+          </select>
+        </div>
+        <div class="field"><label>Cut</label>
+          <select id="cut"><option>Die cut</option><option>Kiss cut</option><option>Square cut</option></select>
+        </div>
+      </div>
+      <div class="field"><label>Bleed / cut line notes</label><input type="text" id="bleed" placeholder="e.g. 2 mm white border around artwork"></div>
+      <div class="field"><label>Notes for factory</label><textarea id="notes" placeholder="Contact, deadline, packaging, proof requirements…"></textarea></div>
+    </section>
+  </div>
+  <div class="side-foot">
+    <button class="btn primary" id="exportPng" disabled>Export spec PNG</button>
+    <button class="btn" id="exportBundle" disabled>Export bundle (ZIP: stickers + PDF)</button>
+    <button class="btn danger" id="reset">Reset</button>
+  </div>
+</aside>
+
+<main id="main">
+  <canvas id="preview"></canvas>
+  <div class="empty" id="empty"><div><strong>Nothing to show yet</strong>Drop a sticker image anywhere to start.</div></div>
+</main>
+<div class="status" id="status"></div>
+
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const stickers = []; // {id, name, file, img, width (inches), qty, ext, dataUrl}
+  let uid = 0;
+
+  const settings = { project: '', unit: 'in', defaultQty: 500, material: 'Vinyl (matte)', cut: 'Die cut', bleed: '', notes: '' };
+  const settingsKeys = Object.keys(settings);
+  const defaults = { ...settings };
+
+  // ---------- persistence for settings only (images stay in memory) ----------
+  try {
+    const saved = JSON.parse(localStorage.getItem('sticker-spec-settings') || '{}');
+    Object.assign(settings, saved);
+  } catch {}
+  settingsKeys.forEach((k) => {
+    const el = document.getElementById(k);
+    if (!el) return;
+    el.value = settings[k];
+    el.addEventListener('input', () => {
+      settings[k] = el.type === 'number' ? Number(el.value) : el.value;
+      try { localStorage.setItem('sticker-spec-settings', JSON.stringify(settings)); } catch {}
+      if (k === 'unit') { renderList(); }
+      if (k === 'project') draw();
+    });
+  });
+
+  // ---------- IndexedDB persistence for stickers (survives refresh) ----------
+  const DB_NAME = 'sticker-spec', STORE = 'stickers';
+  function openDB() {
+    return new Promise((res, rej) => {
+      const r = indexedDB.open(DB_NAME, 1);
+      r.onupgradeneeded = () => r.result.createObjectStore(STORE, { keyPath: 'order' });
+      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+    });
+  }
+  let persistT;
+  function persist() {
+    clearTimeout(persistT);
+    persistT = setTimeout(async () => {
+      try {
+        const db = await openDB();
+        const tx = db.transaction(STORE, 'readwrite'), st = tx.objectStore(STORE);
+        st.clear();
+        stickers.forEach((s, i) => st.put({ order: i, name: s.name, width: s.width, qty: s.qty, ext: s.ext, fileName: s.file.name, type: s.file.type, blob: s.file }));
+        await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
+      } catch (err) { console.warn('persist failed', err); }
+    }, 250);
+  }
+  async function restore() {
+    try {
+      const db = await openDB();
+      const rows = await new Promise((res, rej) => {
+        const r = db.transaction(STORE).objectStore(STORE).getAll();
+        r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+      });
+      rows.sort((a, b) => a.order - b.order);
+      for (const row of rows) {
+        const file = new File([row.blob], row.fileName, { type: row.type });
+        const dataUrl = await readAsDataURL(file);
+        const img = await loadImage(dataUrl);
+        stickers.push({ id: ++uid, file, img, dataUrl, ext: row.ext, name: row.name, width: row.width, qty: row.qty });
+      }
+    } catch (err) { console.warn('restore failed', err); }
+    renderList(); draw();
+  }
+  async function clearDB() {
+    const db = await openDB();
+    const tx = db.transaction(STORE, 'readwrite'); tx.objectStore(STORE).clear();
+    await new Promise((res) => { tx.oncomplete = res; tx.onerror = res; });
+  }
+
+  // ---------- unit helpers (internal unit is inches) ----------
+  const IN_TO_MM = 25.4;
+  const toUnit = (inches) => settings.unit === 'mm' ? inches * IN_TO_MM : inches;
+  const fromUnit = (v) => settings.unit === 'mm' ? v / IN_TO_MM : v;
+  const unitLabel = () => settings.unit === 'mm' ? 'mm' : '”';
+  const fmt = (v) => {
+    const d = settings.unit === 'mm' ? 1 : 2;
+    return (Math.round(v * 10 ** d) / 10 ** d).toString();
+  };
+  const fmtIn = (v) => (Math.round(v * 100) / 100).toString();
+  // Sheet always shows inches, rounded to one decimal (2.5, 2, 1.3).
+  const fmtSheet = (v) => (Math.round(v * 10) / 10).toString();
+  const fmtMm = (v) => (Math.round(v * IN_TO_MM * 10) / 10).toString();
+  const heightOf = (s) => s.width * (s.img.naturalHeight / s.img.naturalWidth);
+
+  // ---------- file intake ----------
+  const drop = $('#drop'), fileInput = $('#file'), main = $('#main');
+  fileInput.addEventListener('change', () => { addFiles(fileInput.files); fileInput.value = ''; });
+  const dz = [drop, main, document.body];
+  ['dragenter', 'dragover'].forEach((ev) => dz.forEach((el) => el.addEventListener(ev, (e) => {
+    e.preventDefault(); e.stopPropagation(); drop.classList.add('over'); main.classList.add('over');
+  })));
+  ['dragleave', 'drop'].forEach((ev) => dz.forEach((el) => el.addEventListener(ev, (e) => {
+    e.preventDefault(); e.stopPropagation();
+    if (ev === 'drop' || e.target === el) { drop.classList.remove('over'); main.classList.remove('over'); }
+    if (ev === 'drop') addFiles(e.dataTransfer.files);
+  })));
+
+  async function addFiles(files) {
+    const list = [...files].filter((f) => f.type.startsWith('image/') || /\.(png|jpe?g|webp|svg|gif)$/i.test(f.name));
+    for (const file of list) {
+      try {
+        const dataUrl = await readAsDataURL(file);
+        const img = await loadImage(dataUrl);
+        const ext = (file.name.match(/\.([a-z0-9]+)$/i) || [, 'png'])[1].toLowerCase();
+        stickers.push({
+          id: ++uid, file, img, dataUrl, ext,
+          name: file.name.replace(/\.[^.]+$/, ''),
+          width: 2.5, qty: settings.defaultQty || 500,
+        });
+      } catch (err) { toast(`Could not load ${file.name}`); }
+    }
+    renderList(); draw(); persist();
+  }
+  const readAsDataURL = (f) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f); });
+  const loadImage = (src) => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
+
+  // ---------- sticker list UI ----------
+  const listEl = $('#list');
+  function renderList() {
+    listEl.innerHTML = '';
+    if (!stickers.length) { listEl.innerHTML = '<div class="empty-list">No stickers yet.</div>'; updateButtons(); return; }
+    stickers.forEach((s, i) => {
+      const el = document.createElement('div');
+      el.className = 'sticker';
+      el.innerHTML = `
+        <img class="thumb" src="${s.dataUrl}" alt="">
+        <div class="meta">
+          <div class="top">
+            <span class="num">#${i + 1}</span>
+            <input type="text" class="name" value="${escapeHtml(s.name)}" placeholder="Name">
+            <div class="icons">
+              <button title="Move up" data-act="up" ${i === 0 ? 'disabled' : ''}>&uarr;</button>
+              <button title="Move down" data-act="down" ${i === stickers.length - 1 ? 'disabled' : ''}>&darr;</button>
+              <button title="Remove" class="del" data-act="del">&times;</button>
+            </div>
+          </div>
+          <div class="dims">
+            <input type="number" class="w" step="${settings.unit === 'mm' ? 1 : 0.05}" min="0.1" value="${fmt(toUnit(s.width))}" title="Width">
+            <span class="h">&times; ${fmt(toUnit(heightOf(s)))} ${settings.unit}</span>
+            <span class="unit">${settings.unit} wide</span>
+          </div>
+          <div class="qtyrow">
+            <input type="number" class="qty" min="1" step="1" value="${s.qty}" title="Quantity">
+            <span class="unit">pcs</span>
+          </div>
+        </div>`;
+      const w = el.querySelector('.w'), h = el.querySelector('.h');
+      w.addEventListener('input', () => {
+        const v = fromUnit(parseFloat(w.value));
+        if (v > 0 && isFinite(v)) { s.width = v; h.innerHTML = `&times; ${fmt(toUnit(heightOf(s)))} ${settings.unit}`; draw(); persist(); }
+      });
+      el.querySelector('.name').addEventListener('input', (e) => { s.name = e.target.value; draw(); persist(); });
+      el.querySelector('.qty').addEventListener('input', (e) => { s.qty = Math.max(1, parseInt(e.target.value) || 1); persist(); });
+      el.querySelector('.icons').addEventListener('click', (e) => {
+        const act = e.target.dataset.act; if (!act) return;
+        if (act === 'del') stickers.splice(i, 1);
+        if (act === 'up' && i > 0) [stickers[i - 1], stickers[i]] = [stickers[i], stickers[i - 1]];
+        if (act === 'down' && i < stickers.length - 1) [stickers[i + 1], stickers[i]] = [stickers[i], stickers[i + 1]];
+        renderList(); draw(); persist();
+      });
+      listEl.appendChild(el);
+    });
+    updateButtons();
+  }
+  const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  function updateButtons() {
+    $('#exportPng').disabled = $('#exportBundle').disabled = !stickers.length;
+    $('#empty').style.display = stickers.length ? 'none' : '';
+    $('#preview').style.display = stickers.length ? '' : 'none';
+  }
+
+  // ---------- spec sheet renderer ----------
+  // Everything is laid out in "layout pixels" where 1 inch of sticker = PPI px.
+  const PPI = 220;
+  const L = {
+    pad: 90, gap: 130, labelSize: 40, labelGap: 90, bracketGap: 42, tick: 40, stroke: 5,
+    bigSize: 64, bigGap: 62, smallSize: 30, smallGap: 12, maxRowWidth: 3200, minCell: 520,
+  };
+  const RED = '#ff1a1a';
+  const font = (weight, px) => `${weight} ${px}px Inter, -apple-system, Helvetica, Arial, sans-serif`;
+
+  function layout() {
+    // Wrap stickers into rows, bottom-aligning images within each row.
+    const rows = []; let row = [], x = L.pad;
+    stickers.forEach((s) => {
+      const w = s.width * PPI, h = heightOf(s) * PPI;
+      const cellW = Math.max(w, L.minCell);
+      if (row.length && x + cellW > L.maxRowWidth - L.pad) { rows.push(row); row = []; x = L.pad; }
+      row.push({ s, w, h, cellW });
+      x += cellW + L.gap;
+    });
+    if (row.length) rows.push(row);
+
+    const cells = []; let y = L.pad, width = 0;
+    rows.forEach((r) => {
+      const maxH = Math.max(...r.map((c) => c.h));
+      const top = y + L.labelSize + L.labelGap;           // image area top
+      const baseline = top + maxH;                        // image bottoms
+      let cx = L.pad;
+      r.forEach((c) => {
+        const imgX = cx + (c.cellW - c.w) / 2;
+        cells.push({ ...c, cellX: cx, labelY: y, imgX, imgY: baseline - c.h, baseline });
+        cx += c.cellW + L.gap;
+      });
+      width = Math.max(width, cx - L.gap + L.pad);
+      y = baseline + L.bracketGap + L.tick + L.bigGap + L.bigSize + L.smallGap + L.smallSize + L.pad;
+    });
+    return { cells, width, height: y };
+  }
+
+  function drawSheet(ctx, scale) {
+    const { cells, width, height } = layout();
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, width, height);
+    ctx.imageSmoothingQuality = 'high';
+    cells.forEach((c, i) => {
+      const { s } = c;
+      // label
+      ctx.fillStyle = RED; ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+      ctx.font = font(500, L.labelSize);
+      ctx.fillText(`#${i + 1}`, c.cellX, c.labelY);
+      // image
+      ctx.drawImage(s.img, c.imgX, c.imgY, c.w, c.h);
+      // bracket
+      const by = c.baseline + L.bracketGap + L.tick;
+      ctx.strokeStyle = RED; ctx.lineWidth = L.stroke; ctx.lineCap = 'butt'; ctx.lineJoin = 'miter';
+      ctx.beginPath();
+      ctx.moveTo(c.imgX + L.stroke / 2, by - L.tick); ctx.lineTo(c.imgX + L.stroke / 2, by);
+      ctx.lineTo(c.imgX + c.w - L.stroke / 2, by); ctx.lineTo(c.imgX + c.w - L.stroke / 2, by - L.tick);
+      ctx.stroke();
+      // big width
+      const cxm = c.imgX + c.w / 2;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.font = font(700, L.bigSize);
+      ctx.fillText(`${fmtSheet(s.width)}\u201D`, cxm, by + L.bigGap);
+      ctx.font = font(500, L.smallSize);
+      ctx.fillText(`${fmtSheet(s.width)}\u201Dx${fmtSheet(heightOf(s))}\u201D`, cxm, by + L.bigGap + L.bigSize + L.smallGap);
+    });
+    return { width, height };
+  }
+
+  const preview = $('#preview');
+  let drawQueued = false;
+  function draw() {
+    if (drawQueued) return; drawQueued = true;
+    requestAnimationFrame(async () => {
+      drawQueued = false;
+      if (!stickers.length) return;
+      await document.fonts.load(font(700, 20)).catch(() => {});
+      const { width, height } = layout();
+      const scale = Math.min(1, 1600 / width);
+      preview.width = Math.round(width * scale); preview.height = Math.round(height * scale);
+      preview.style.width = Math.min(width * scale, 1600) / 2 * 1.2 + 'px';
+      drawSheet(preview.getContext('2d'), scale);
+    });
+  }
+  document.fonts.ready.then(restore);
+
+  $('#reset').addEventListener('click', async () => {
+    const n = stickers.length;
+    if (!confirm(`Reset everything? This removes ${n} sticker${n === 1 ? '' : 's'} and clears the order details.`)) return;
+    stickers.length = 0;
+    await clearDB();
+    try { localStorage.removeItem('sticker-spec-settings'); } catch {}
+    settingsKeys.forEach((k) => { settings[k] = defaults[k]; const el = document.getElementById(k); if (el) el.value = defaults[k]; });
+    renderList(); draw(); toast('Reset');
+  });
+
+  // ---------- exports ----------
+  function renderSheetCanvas(scale = 1) {
+    const { width, height } = layout();
+    const c = document.createElement('canvas');
+    c.width = Math.round(width * scale); c.height = Math.round(height * scale);
+    drawSheet(c.getContext('2d'), scale);
+    return c;
+  }
+  const canvasToBlob = (c, type = 'image/png', q) => new Promise((res) => c.toBlob(res, type, q));
+  const slug = (s) => (s || 'sticker').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'sticker';
+  const projectSlug = () => slug(settings.project) || 'stickers';
+  const download = (blob, name) => {
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  };
+
+  $('#exportPng').addEventListener('click', async () => {
+    await document.fonts.load(font(700, 20)).catch(() => {});
+    const blob = await canvasToBlob(renderSheetCanvas(1));
+    download(blob, `${projectSlug()}-spec.png`);
+    toast('Spec PNG exported');
+  });
+
+  $('#exportBundle').addEventListener('click', async () => {
+    const btn = $('#exportBundle'); btn.disabled = true; btn.textContent = 'Building bundle…';
+    try {
+      await document.fonts.load(font(700, 20)).catch(() => {});
+      const zip = new JSZip();
+      const sheetBlob = await canvasToBlob(renderSheetCanvas(1));
+      zip.file('spec-sheet.png', sheetBlob);
+      const folder = zip.folder('stickers');
+      const manifest = [];
+      stickers.forEach((s, i) => {
+        const fname = `${i + 1}.${s.ext}`;
+        folder.file(fname, s.file);
+        manifest.push({
+          number: i + 1, name: s.name, file: `stickers/${fname}`,
+          width_in: +fmtIn(s.width), height_in: +fmtIn(heightOf(s)),
+          width_mm: +fmtMm(s.width), height_mm: +fmtMm(heightOf(s)),
+          quantity: s.qty, artwork_px: `${s.img.naturalWidth}x${s.img.naturalHeight}`,
+          artwork_dpi_at_size: Math.round(s.img.naturalWidth / s.width),
+        });
+      });
+      const pdfBlob = await buildPdf(sheetBlob);
+      zip.file('spec.pdf', pdfBlob);
+      zip.file('spec.json', JSON.stringify({
+        project: settings.project, generated: new Date().toISOString(),
+        material: settings.material, cut: settings.cut, bleed: settings.bleed, notes: settings.notes,
+        stickers: manifest,
+      }, null, 2));
+      const blob = await zip.generateAsync({ type: 'blob' });
+      download(blob, `${projectSlug()}-bundle.zip`);
+      toast('Bundle exported');
+    } catch (err) {
+      console.error(err); toast('Export failed: ' + err.message);
+    } finally { btn.disabled = false; btn.textContent = 'Export bundle (ZIP: stickers + PDF)'; }
+  });
+
+  // ---------- PDF spec sheet ----------
+  async function buildPdf(sheetBlob) {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: 'pt', format: 'letter', compress: true });
+    const PW = doc.internal.pageSize.getWidth(), PH = doc.internal.pageSize.getHeight(), M = 48;
+    const title = settings.project || 'Sticker order';
+    const date = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    const totalQty = stickers.reduce((a, s) => a + s.qty, 0);
+
+    // --- page 1: header + summary + overview image ---
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(22); doc.setTextColor(24, 24, 27);
+    doc.text('Sticker production specification', M, M + 12);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(11); doc.setTextColor(113, 113, 122);
+    doc.text(`${title}  ·  ${date}`, M, M + 32);
+
+    let y = M + 60;
+    const kv = [
+      ['Material', settings.material], ['Cut type', settings.cut],
+      ['Designs', String(stickers.length)], ['Total quantity', `${totalQty.toLocaleString()} pcs`],
+      ['Bleed / cut line', settings.bleed || '—'],
+    ];
+    doc.setFontSize(10);
+    kv.forEach(([k, v], i) => {
+      const col = i % 2, rowY = y + Math.floor(i / 2) * 18;
+      const x = M + col * (PW - 2 * M) / 2;
+      doc.setTextColor(113, 113, 122); doc.text(k, x, rowY);
+      doc.setTextColor(24, 24, 27); doc.text(v, x + 90, rowY);
+    });
+    y += Math.ceil(kv.length / 2) * 18 + 8;
+    if (settings.notes) {
+      doc.setTextColor(113, 113, 122); doc.text('Notes', M, y);
+      doc.setTextColor(24, 24, 27);
+      const lines = doc.splitTextToSize(settings.notes, PW - 2 * M - 90);
+      doc.text(lines, M + 90, y); y += lines.length * 13 + 8;
+    }
+
+    // overview image
+    const sheetUrl = await blobToDataURL(sheetBlob);
+    const sheetImg = await loadImage(sheetUrl);
+    const availW = PW - 2 * M, availH = PH - y - M - 10;
+    const r = Math.min(availW / sheetImg.naturalWidth, availH / sheetImg.naturalHeight);
+    const iw = sheetImg.naturalWidth * r, ih = sheetImg.naturalHeight * r;
+    y += 10;
+    doc.setDrawColor(228, 228, 231); doc.rect(M, y, availW, ih + 24);
+    doc.addImage(sheetUrl, 'PNG', M + (availW - iw) / 2, y + 12, iw, ih, undefined, 'MEDIUM');
+    footer(doc, 1);
+
+    // --- page 2: table ---
+    doc.addPage();
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(24, 24, 27);
+    doc.text('Sticker list', M, M + 8);
+    const cols = [
+      { h: '#', w: 24 }, { h: 'Name', w: 120 }, { h: 'Size (in)', w: 80 }, { h: 'Size (mm)', w: 90 },
+      { h: 'Qty', w: 50 }, { h: 'File', w: PW - 2 * M - 364 },
+    ];
+    y = M + 30;
+    const drawHeader = () => {
+      doc.setFillColor(244, 244, 245); doc.rect(M, y - 12, PW - 2 * M, 20, 'F');
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(113, 113, 122);
+      let x = M + 6; cols.forEach((c) => { doc.text(c.h, x, y + 2); x += c.w; }); y += 22;
+    };
+    drawHeader();
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(24, 24, 27);
+    stickers.forEach((s, i) => {
+      if (y > PH - M) { footer(doc, doc.getNumberOfPages()); doc.addPage(); y = M + 10; drawHeader(); doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(24, 24, 27); }
+      const vals = [
+        String(i + 1), s.name, `${fmtIn(s.width)} × ${fmtIn(heightOf(s))}`,
+        `${fmtMm(s.width)} × ${fmtMm(heightOf(s))}`, s.qty.toLocaleString(),
+        `stickers/${i + 1}.${s.ext}`,
+      ];
+      let x = M + 6;
+      vals.forEach((v, j) => { doc.text(doc.splitTextToSize(v, cols[j].w - 10)[0], x, y); x += cols[j].w; });
+      doc.setDrawColor(228, 228, 231); doc.line(M, y + 7, PW - M, y + 7);
+      y += 20;
+    });
+    footer(doc, doc.getNumberOfPages());
+
+    // --- one page per sticker ---
+    for (let i = 0; i < stickers.length; i++) {
+      const s = stickers[i];
+      doc.addPage();
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(255, 26, 26);
+      doc.text(`#${i + 1}`, M, M + 8);
+      doc.setTextColor(24, 24, 27); doc.text(s.name, M + 34, M + 8);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+      const specs = [
+        ['Finished size', `${fmtIn(s.width)}" × ${fmtIn(heightOf(s))}"   (${fmtMm(s.width)} × ${fmtMm(heightOf(s))} mm)`],
+        ['Quantity', `${s.qty.toLocaleString()} pcs`],
+        ['Material', settings.material], ['Cut', settings.cut],
+        ['Artwork', `${s.img.naturalWidth} × ${s.img.naturalHeight} px  (~${Math.round(s.img.naturalWidth / s.width)} dpi at size)`],
+        ['File', `stickers/${i + 1}.${s.ext}`],
+      ];
+      let sy = M + 34;
+      specs.forEach(([k, v]) => { doc.setTextColor(113, 113, 122); doc.text(k, M, sy); doc.setTextColor(24, 24, 27); doc.text(v, M + 90, sy); sy += 16; });
+
+      // artwork preview, at true scale if it fits, else scaled to fit
+      const pngUrl = await imageToPngDataUrl(s.img, 1400);
+      const trueW = s.width * 72, trueH = heightOf(s) * 72;
+      const maxW = PW - 2 * M, maxH = PH - sy - M - 40;
+      const rr = Math.min(1, maxW / trueW, maxH / trueH);
+      const dw = trueW * rr, dh = trueH * rr;
+      const ix = M + (maxW - dw) / 2, iy = sy + 24;
+      doc.addImage(pngUrl, 'PNG', ix, iy, dw, dh, undefined, 'MEDIUM');
+      // dimension bracket like the sheet
+      doc.setDrawColor(255, 26, 26); doc.setLineWidth(1.2);
+      const by = iy + dh + 14;
+      doc.line(ix, by - 8, ix, by); doc.line(ix, by, ix + dw, by); doc.line(ix + dw, by - 8, ix + dw, by);
+      doc.setTextColor(255, 26, 26); doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
+      doc.text(`${fmtSheet(s.width)}"`, ix + dw / 2, by + 16, { align: 'center' });
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+      doc.text(`${fmtSheet(s.width)}"x${fmtSheet(heightOf(s))}"`, ix + dw / 2, by + 30, { align: 'center' });
+      footer(doc, doc.getNumberOfPages());
+    }
+    return doc.output('blob');
+  }
+  function footer(doc, page) {
+    const PW = doc.internal.pageSize.getWidth(), PH = doc.internal.pageSize.getHeight();
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(160, 160, 170);
+    doc.text(`${settings.project || 'Sticker order'}  ·  page ${page}`, PW - 48, PH - 24, { align: 'right' });
+  }
+  const blobToDataURL = (b) => new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(b); });
+  async function imageToPngDataUrl(img, maxPx) {
+    const r = Math.min(1, maxPx / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.naturalWidth * r); c.height = Math.round(img.naturalHeight * r);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    return c.toDataURL('image/png');
+  }
+
+  // ---------- misc ----------
+  let toastT;
+  function toast(msg) {
+    const el = $('#status'); el.textContent = msg; el.classList.add('show');
+    clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove('show'), 2200);
+  }
+  updateButtons();
+})();
+</script>
+</body>
+</html>
